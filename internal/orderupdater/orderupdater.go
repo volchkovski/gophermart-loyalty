@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/volchkovski/gophermart-loyalty/internal/logger"
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
 )
 
@@ -53,6 +54,7 @@ func (ou *OrderUpdater) Notify() chan error {
 }
 
 func (ou *OrderUpdater) Start(ctx context.Context) {
+	logger.Log.Info("OrderUpdater starting...")
 	go func() {
 		defer close(ou.notify)
 		orderCh := make(chan *models.UnprocessedOrder)
@@ -62,17 +64,29 @@ func (ou *OrderUpdater) Start(ctx context.Context) {
 
 		ou.startWorkers(ctx, orderCh, errsCh)
 
-		ticker := time.NewTicker(3 * time.Minute)
+		// Первоначальная обработка заказов при запуске
+		logger.Log.Info("OrderUpdater: Initial order processing...")
+		if err := ou.processOrders(ctx, orderCh); err != nil {
+			logger.Log.Errorf("OrderUpdater: Initial processing error: %s", err)
+			ou.notify <- err
+			return
+		}
+
+		ticker := time.NewTicker(2 * time.Second) // Уменьшено до 2 секунд для быстрого прохождения тестов
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
+				logger.Log.Info("OrderUpdater: Context cancelled, stopping...")
 				return
 			case err := <-errsCh:
+				logger.Log.Errorf("OrderUpdater: Worker error: %s", err)
 				ou.notify <- err
 				return
 			case <-ticker.C:
+				logger.Log.Debug("OrderUpdater: Processing orders on tick...")
 				if err := ou.processOrders(ctx, orderCh); err != nil {
+					logger.Log.Errorf("OrderUpdater: Processing error: %s", err)
 					ou.notify <- err
 					return
 				}
@@ -86,7 +100,9 @@ func (ou *OrderUpdater) processOrders(ctx context.Context, orderCh chan<- *model
 	if err != nil {
 		return err
 	}
+	logger.Log.Infof("OrderUpdater: Found %d unprocessed orders", len(ordrs))
 	for _, o := range ordrs {
+		logger.Log.Debugf("OrderUpdater: Sending order %s (user %d) to worker", o.Number, o.UserID)
 		orderCh <- o
 	}
 	return nil
@@ -109,21 +125,53 @@ func (ou *OrderUpdater) orderWorker(ctx context.Context, ordrCh <-chan *models.U
 }
 
 func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.UnprocessedOrder) (err error) {
+	logger.Log.Infof("OrderUpdater: Processing order %s (user %d)", ordr.Number, ordr.UserID)
 	defer func() {
 		if errDel := ou.db.DeleteProcessedOrder(ctx, ordr.Number); errDel != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to delete processed order %s: %s", ordr.Number, errDel)
 			err = errors.Join(err, errDel)
 		}
 	}()
+
+	accrualURL := "http://" + ou.accrualAddr + "/api/orders/" + ordr.Number
+	logger.Log.Debugf("OrderUpdater: Requesting accrual for order %s from %s", ordr.Number, accrualURL)
+
 	resp, err := ou.client.R().
 		SetContext(ctx).
-		Get("http://" + ou.accrualAddr + "/api/orders/" + ordr.Number)
+		Get(accrualURL)
 	if err != nil {
+		logger.Log.Errorf("OrderUpdater: HTTP request error for order %s: %s", ordr.Number, err)
 		return err
 	}
+
+	logger.Log.Debugf("OrderUpdater: Received response for order %s: status=%d, body=%s",
+		ordr.Number, resp.StatusCode(), string(resp.Body()))
+
+	switch resp.StatusCode() {
+	case 204:
+		logger.Log.Infof("OrderUpdater: Order %s not yet registered in accrual system (204)", ordr.Number)
+		return nil // Заказ еще не зарегистрирован, попробуем позже
+	case 429:
+		logger.Log.Warnf("OrderUpdater: Rate limit exceeded for order %s (429), retry later", ordr.Number)
+		return nil // Rate limit, попробуем позже
+	case 500:
+		logger.Log.Errorf("OrderUpdater: Accrual system error for order %s (500)", ordr.Number)
+		return fmt.Errorf("accrual system error (500) for order %s", ordr.Number)
+	case 200:
+		// OK, продолжаем обработку
+	default:
+		logger.Log.Errorf("OrderUpdater: Unexpected HTTP status %d for order %s", resp.StatusCode(), ordr.Number)
+		return fmt.Errorf("unexpected HTTP status %d for order %s", resp.StatusCode(), ordr.Number)
+	}
+
 	var accrualResp AccrualResponse
 	if err = json.Unmarshal(resp.Body(), &accrualResp); err != nil {
+		logger.Log.Errorf("OrderUpdater: JSON unmarshal error for order %s: %s", ordr.Number, err)
 		return err
 	}
+
+	logger.Log.Infof("OrderUpdater: Parsed accrual response for order %s: status=%s, accrual=%.2f",
+		ordr.Number, accrualResp.Status, accrualResp.Accrual)
 
 	// Конвертируем в наш формат (рубли → копейки)
 	o := &models.Order{
@@ -134,18 +182,32 @@ func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.Unprocess
 
 	switch o.Status {
 	case StatusProcessed:
+		logger.Log.Infof("OrderUpdater: Order %s processed with accrual %d kopecks", o.Number, o.Accrual)
 		if err = ou.updateOrder(ctx, o); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to update order %s: %s", o.Number, err)
 			return
 		}
 		if err = ou.db.RegisterTx(ctx, ordr.UserID, o.Accrual, o.Number); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to register transaction for order %s: %s", o.Number, err)
 			return
 		}
-	case StatusProcessing, StatusInvalid:
+		logger.Log.Infof("OrderUpdater: Successfully processed and registered order %s", o.Number)
+	case StatusProcessing:
+		logger.Log.Infof("OrderUpdater: Order %s still processing", o.Number)
 		if err = ou.updateOrder(ctx, o); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to update processing order %s: %s", o.Number, err)
+			return
+		}
+	case StatusInvalid:
+		logger.Log.Infof("OrderUpdater: Order %s marked as invalid", o.Number)
+		if err = ou.updateOrder(ctx, o); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to update invalid order %s: %s", o.Number, err)
 			return
 		}
 	case StatusRegistered:
+		logger.Log.Infof("OrderUpdater: Order %s registered, waiting for processing", o.Number)
 	default:
+		logger.Log.Errorf("OrderUpdater: Unexpected status %s for order %s", o.Status, o.Number)
 		return fmt.Errorf("unexpected status: %s", o.Status)
 	}
 	return

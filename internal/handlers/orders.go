@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+
 	"github.com/volchkovski/gophermart-loyalty/internal/logger"
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
 	"github.com/volchkovski/gophermart-loyalty/internal/services/orders"
 	"github.com/volchkovski/gophermart-loyalty/internal/valid"
-	"io"
-	"net/http"
 )
 
 type OrderManager interface {
@@ -65,26 +66,30 @@ func OrdersHandler(o OrderManager) http.HandlerFunc {
 		ctx := r.Context()
 		userID, err := contextUserID(ctx)
 		if err != nil {
-			logger.Log.Errorln(err.Error())
+			logger.Log.Errorf("OrdersHandler: Failed to get user ID from context: %s", err.Error())
 			handleInternalServerError(w)
 			return
 		}
+		logger.Log.Debugf("OrdersHandler: Getting orders for user %d", userID)
 		userOrders, err := o.Orders(ctx, userID)
 		if err != nil {
-			logger.Log.Errorf("Failed to get orders for user %d: %s", userID, err.Error())
+			logger.Log.Errorf("OrdersHandler: Failed to get orders for user %d: %s", userID, err.Error())
 			handleInternalServerError(w)
 			return
 		}
+		logger.Log.Debugf("OrdersHandler: Found %d orders for user %d", len(userOrders), userID)
 		if len(userOrders) == 0 {
+			logger.Log.Debugf("OrdersHandler: No orders found for user %d, returning 204", userID)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if err = json.NewEncoder(w).Encode(userOrders); err != nil {
-			logger.Log.Errorf("Failed to encode result for %d user: %s", userID, err.Error())
+			logger.Log.Errorf("OrdersHandler: Failed to encode result for user %d: %s", userID, err.Error())
 			handleInternalServerError(w)
 			return
 		}
+		logger.Log.Debugf("OrdersHandler: Successfully returned %d orders for user %d", len(userOrders), userID)
 	}
 }
