@@ -1,0 +1,1 @@
+SELECT SUM(amount) FROM transactions WHERE user_id = $1 AND amount < 0;

@@ -3,23 +3,24 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/volchkovski/gophermart-loyalty/internal/logger"
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
-	"github.com/volchkovski/gophermart-loyalty/internal/utils"
+	"github.com/volchkovski/gophermart-loyalty/internal/services/orders"
+	"github.com/volchkovski/gophermart-loyalty/internal/valid"
 	"io"
 	"net/http"
-	"strconv"
 )
 
 type OrderManager interface {
-	SaveOrder(context.Context, *models.Order) (*models.SaveOrderResult, error)
-	Orders(context.Context, int) ([]*models.Order, error)
+	SaveOrder(ctx context.Context, userID int64, orderNumber string) error
+	Orders(ctx context.Context, userID int64) ([]*models.Order, error)
 }
 
 func NewOrderHandler(o OrderManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		userID, err := utils.ContextUserID(ctx)
+		userID, err := contextUserID(ctx)
 		if err != nil {
 			logger.Log.Errorln(err.Error())
 			handleInternalServerError(w)
@@ -27,8 +28,8 @@ func NewOrderHandler(o OrderManager) http.HandlerFunc {
 		}
 		body, err := io.ReadAll(r.Body)
 		defer func() {
-			if err := r.Body.Close(); err != nil {
-				logger.Log.Errorf("Failed to close request body: %s", err.Error())
+			if errClose := r.Body.Close(); errClose != nil {
+				logger.Log.Errorf("Failed to close request body: %s", errClose.Error())
 			}
 		}()
 		if err != nil {
@@ -36,47 +37,51 @@ func NewOrderHandler(o OrderManager) http.HandlerFunc {
 			handleInternalServerError(w)
 			return
 		}
-		orderNumber, err := strconv.Atoi(string(body))
-		if err != nil {
-			logger.Log.Errorln("Order number is not string")
-			http.Error(w, "Invalid order number", http.StatusBadRequest)
+		orderNumber := string(body)
+		if !valid.OrderNumber(orderNumber) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
 			return
 		}
-		result, err := o.SaveOrder(r.Context(), &models.Order{Number: orderNumber, UserID: userID})
+		err = o.SaveOrder(r.Context(), userID, orderNumber)
 		if err != nil {
+			if errors.Is(err, orders.ErrAlreadyExists) {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if errors.Is(err, orders.ErrAnotherUser) {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			logger.Log.Errorln(err.Error())
 			handleInternalServerError(w)
 			return
 		}
-		if result.Fail != nil {
-			http.Error(w, result.Fail.Msg, result.Fail.StatusCode)
-			return
-		}
-		w.WriteHeader(result.StatusCode)
+		w.WriteHeader(http.StatusAccepted)
 	}
 }
 
 func OrdersHandler(o OrderManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		userID, err := utils.ContextUserID(ctx)
+		userID, err := contextUserID(ctx)
 		if err != nil {
 			logger.Log.Errorln(err.Error())
 			handleInternalServerError(w)
 			return
 		}
-		orders, err := o.Orders(ctx, userID)
+		userOrders, err := o.Orders(ctx, userID)
 		if err != nil {
 			logger.Log.Errorf("Failed to get orders for user %d: %s", userID, err.Error())
 			handleInternalServerError(w)
 			return
 		}
-		if len(orders) == 0 {
+		if len(userOrders) == 0 {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		if err = json.NewEncoder(w).Encode(orders); err != nil {
+		if err = json.NewEncoder(w).Encode(userOrders); err != nil {
 			logger.Log.Errorf("Failed to encode result for %d user: %s", userID, err.Error())
 			handleInternalServerError(w)
 			return

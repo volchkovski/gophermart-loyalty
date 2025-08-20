@@ -2,60 +2,83 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
+	"github.com/volchkovski/gophermart-loyalty/internal/storage"
 	"golang.org/x/crypto/bcrypt"
-	"net/http"
 )
 
-type authDB interface {
-	User(context.Context, string) (*models.User, error)
-	NewUser(context.Context, string, string) (*models.User, error)
+type db interface {
+	User(ctx context.Context, login string) (*models.User, error)
+	NewUser(ctx context.Context, login, passwordHash string) (*models.User, error)
 }
 
 type Auth struct {
 	secret []byte
-	db     authDB
+	db     db
 }
 
-func New(secret string, db authDB) *Auth {
+func New(secret string, db db) *Auth {
 	return &Auth{
 		secret: []byte(secret),
 		db:     db,
 	}
 }
 
-func (a *Auth) Register(ctx context.Context, data *models.RegistrationData) (*models.RegistrationResult, error) {
-	user, err := a.db.User(ctx, data.Login)
+func (a *Auth) Register(ctx context.Context, login string, password string) (string, error) {
+	//user, err := a.db.User(ctx, login)
+	//if err != nil {
+	//	return "", fmt.Errorf("user_id check error: %w", err)
+	//}
+	//if user != nil {
+	//	return "", ErrLoginIsTaken
+	//}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, fmt.Errorf("user_id check error: %w", err)
+		return "", fmt.Errorf("password hash gen error: %w", err)
 	}
-	if user != nil {
-		return &models.RegistrationResult{
-			Token: "",
-			Fail: &models.Fail{
-				Msg:        "login already exists",
-				StatusCode: http.StatusConflict,
-			},
-		}, nil
-	}
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(data.Password), bcrypt.DefaultCost)
+	user, err := a.db.NewUser(ctx, login, string(passwordHash))
 	if err != nil {
-		return nil, fmt.Errorf("password hash gen error: %w", err)
+		if errors.Is(err, storage.ErrUserLoginAlreadyExists) {
+			return "", ErrLoginIsTaken
+		}
+		return "", fmt.Errorf("new user creation error: %w", err)
 	}
-	user, err = a.db.NewUser(ctx, data.Login, string(passwordHash))
+	token, err := a.createToken(user.ID)
 	if err != nil {
-		return nil, fmt.Errorf("new user creation error: %w", err)
+		return "", fmt.Errorf("token creation error: %w", err)
 	}
-	token, err := a.createToken(user)
+	return token, nil
+}
+
+func (a *Auth) Login(ctx context.Context, login string, password string) (string, error) {
+	user, err := a.db.User(ctx, login)
 	if err != nil {
-		return nil, fmt.Errorf("token creation error: %w", err)
+		return "", fmt.Errorf("failed to get user: %w", err)
 	}
-	return &models.RegistrationResult{
-		Token: token,
-		Fail:  nil,
-	}, nil
+	if user == nil {
+		return "", ErrNoUser
+	}
+	if err = bcrypt.CompareHashAndPassword([]byte(user.HashedPassword), []byte(password)); err != nil {
+		return "", ErrInvalidPassword
+	}
+	token, err := a.createToken(user.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create token: %w", err)
+	}
+	return token, nil
+}
+
+func (a *Auth) createToken(userID int64) (string, error) {
+	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, models.CustomClaims{
+		UserID: userID,
+	}).SignedString(a.secret)
+	if err != nil {
+		return "", err
+	}
+	return tokenString, nil
 }
 
 func (a *Auth) VerifyToken(tokenString string) (*models.CustomClaims, error) {
@@ -75,47 +98,4 @@ func (a *Auth) VerifyToken(tokenString string) (*models.CustomClaims, error) {
 		return claims, nil
 	}
 	return nil, fmt.Errorf("invalid token")
-}
-
-func (a *Auth) Login(ctx context.Context, d *models.RegistrationData) (*models.LoggingResult, error) {
-	user, err := a.db.User(ctx, d.Login)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user: %w", err)
-	}
-	if user == nil {
-		return &models.LoggingResult{
-			Token: "",
-			Fail: &models.Fail{
-				Msg:        "login is not registered",
-				StatusCode: http.StatusUnauthorized,
-			},
-		}, nil
-	}
-	if err = bcrypt.CompareHashAndPassword([]byte(user.HashedPassword), []byte(d.Password)); err != nil {
-		return &models.LoggingResult{
-			Token: "",
-			Fail: &models.Fail{
-				Msg:        "invalid login or password",
-				StatusCode: http.StatusUnauthorized,
-			},
-		}, nil
-	}
-	token, err := a.createToken(user)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create token: %w", err)
-	}
-	return &models.LoggingResult{
-		Token: token,
-		Fail:  nil,
-	}, nil
-}
-
-func (a *Auth) createToken(u *models.User) (string, error) {
-	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, models.CustomClaims{
-		UserID: u.ID,
-	}).SignedString(a.secret)
-	if err != nil {
-		return "", err
-	}
-	return tokenString, nil
 }

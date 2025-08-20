@@ -1,61 +1,40 @@
 package models
 
-import "github.com/golang-jwt/jwt/v5"
-
-type Fail struct {
-	Msg        string
-	StatusCode int
-}
-
-type RegistrationData struct {
-	Login    string `json:"login"`
-	Password string `json:"password"`
-}
-
-type RegistrationResult struct {
-	Token string
-	Fail  *Fail
-}
-
-type LoggingResult struct {
-	Token string
-	Fail  *Fail
-}
+import (
+	"github.com/golang-jwt/jwt/v5"
+	"time"
+)
 
 type Order struct {
-	Number     int    `json:"number"`
-	Status     string `json:"status"`
-	Accrual    int    `json:"accrual"`
-	UploadedAt int    `json:"-"`
-	UserID     int    `json:"-"`
+	Number     string    `json:"number"`
+	Status     string    `json:"status"`
+	Accrual    int64     `json:"accrual,omitempty"`
+	UploadedAt time.Time `json:"uploaded_at"`
 }
 
-type SaveOrderResult struct {
-	StatusCode int
-	Fail       *Fail
+type UnprocessedOrder struct {
+	Number string
+	UserID int64
 }
 
-type BalanceResult struct {
-	Current   int `json:"-"`
-	Withdrawn int `json:"withdrawn"`
+type Balance struct {
+	Current   int64 `json:"-"`
+	Withdrawn int64 `json:"-"`
 }
 
 type Withdrawal struct {
-	Order       int `json:"-"`
-	Sum         int `json:"sum"`
-	ProcessedAt int `json:"-"`
-}
-
-type WithdrawResult struct {
-	Fail *Fail
+	Order       string    `json:"order"`
+	Sum         int64     `json:"-"`
+	ProcessedAt time.Time `json:"processed_at"`
 }
 
 type User struct {
-	ID             int
+	ID             int64
+	Login          string
 	HashedPassword string
 }
 
 type CustomClaims struct {
-	UserID int `json:"user_id"`
+	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
 }

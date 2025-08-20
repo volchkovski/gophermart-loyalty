@@ -2,60 +2,44 @@ package models
 
 import (
 	"encoding/json"
-	"fmt"
-	"strconv"
-	"time"
+	"math"
 )
 
-func (o Order) MarshalJSON() ([]byte, error) {
-	type Alias Order
-	return json.Marshal(&struct {
-		UploadedAt string `json:"uploaded_at"`
-		*Alias
-	}{
-		UploadedAt: time.Unix(int64(o.UploadedAt), 0).Format(time.RFC3339),
-		Alias:      (*Alias)(&o),
-	})
-}
-
-func (b BalanceResult) MarshalJSON() ([]byte, error) {
-	type Alias BalanceResult
-	return json.Marshal(&struct {
-		Current float64 `json:"current"`
-		*Alias
-	}{
-		Current: float64(b.Current) / 100.0,
-		Alias:   (*Alias)(&b),
+func (b Balance) MarshalJSON() ([]byte, error) {
+	type Alias struct {
+		Current   float64 `json:"current"`
+		Withdrawn float64 `json:"withdrawn"`
+	}
+	return json.Marshal(Alias{
+		Current:   float64(b.Current) / 100,
+		Withdrawn: float64(b.Withdrawn) / 100,
 	})
 }
 
 func (w *Withdrawal) UnmarshalJSON(data []byte) error {
+	type Alias Withdrawal
 	var temp struct {
-		Order string `json:"order"`
-		*Withdrawal
+		Alias
+		Sum float64 `json:"sum"`
 	}
+
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
-	order, err := strconv.Atoi(temp.Order)
-	if err != nil {
-		return fmt.Errorf("failed to convert string order to integer: %w", err)
-	}
 
-	w.Order = order
-	w.Sum = temp.Sum
+	*w = Withdrawal(temp.Alias)
+	w.Sum = int64(math.Round(temp.Sum * 100))
+
 	return nil
 }
 
 func (w *Withdrawal) MarshalJSON() ([]byte, error) {
 	type Alias Withdrawal
 	return json.Marshal(&struct {
-		Order       string `json:"order"`
-		ProcessedAt string `json:"processed_at"`
+		Sum float64 `json:"sum"`
 		*Alias
 	}{
-		Order:       strconv.Itoa(w.Order),
-		ProcessedAt: time.Unix(int64(w.ProcessedAt), 0).Format(time.RFC3339),
-		Alias:       (*Alias)(w),
+		Sum:   float64(w.Sum) / 100,
+		Alias: (*Alias)(w),
 	})
 }
