@@ -1,4 +1,4 @@
-SELECT order_number, amount, processed_at
+SELECT order_number, ABS(amount) as amount, processed_at
 FROM transactions
 WHERE user_id = $1
   AND amount < 0
