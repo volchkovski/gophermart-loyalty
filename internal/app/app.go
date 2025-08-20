@@ -68,7 +68,7 @@ func MustRun(cfg *config.Config) {
 	case err = <-server.Notify():
 	case err = <-updater.Notify():
 	case s := <-interrupt:
-		logger.Log.Infof("app - MustRun - signal: %s" + s.String())
+		logger.Log.Infof("app - MustRun - signal: %s", s.String())
 	}
 	if err != nil {
 		logger.Log.Infof("app - MustRun - error: %s", err.Error())
