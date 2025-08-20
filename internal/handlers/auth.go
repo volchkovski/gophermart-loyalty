@@ -51,7 +51,7 @@ func RegisterHandler(reg Auth) http.HandlerFunc {
 			handleInternalServerError(w)
 			return
 		}
-		w.Header().Set("Authorization", token)
+		w.Header().Set("Authorization", "Bearer "+token)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -86,7 +86,7 @@ func LoginHandler(l Auth) http.HandlerFunc {
 			handleInternalServerError(w)
 			return
 		}
-		w.Header().Set("Authorization", token)
+		w.Header().Set("Authorization", "Bearer "+token)
 		w.WriteHeader(http.StatusOK)
 	}
 }

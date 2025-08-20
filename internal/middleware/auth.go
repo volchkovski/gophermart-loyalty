@@ -2,9 +2,11 @@ package middleware
 
 import (
 	"context"
+	"net/http"
+	"strings"
+
 	"github.com/volchkovski/gophermart-loyalty/internal/logger"
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
-	"net/http"
 )
 
 type contextKey string
@@ -20,7 +22,19 @@ type TokenVerifier interface {
 func WithAuth(v TokenVerifier) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		verifyFn := func(w http.ResponseWriter, r *http.Request) {
-			tokenString := r.Header.Get("Authorization")
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				logger.Log.Info("Missing authorization header")
+				http.Error(w, "Missing authorization", http.StatusUnauthorized)
+				return
+			}
+
+			// Извлекаем токен из "Bearer <token>"
+			tokenString := authHeader
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+
 			claims, err := v.VerifyToken(tokenString)
 			if err != nil {
 				logger.Log.Infof("Invalid token: %s", err.Error())
