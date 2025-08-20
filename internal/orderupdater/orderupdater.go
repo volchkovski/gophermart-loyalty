@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"time"
+
 	"github.com/go-resty/resty/v2"
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
-	"time"
 )
 
 const (
@@ -16,6 +18,12 @@ const (
 	StatusInvalid    = "INVALID"
 	StatusRegistered = "REGISTERED"
 )
+
+type AccrualResponse struct {
+	Order   string  `json:"order"`
+	Status  string  `json:"status"`
+	Accrual float64 `json:"accrual,omitempty"`
+}
 
 type db interface {
 	UnprocessedOrders(ctx context.Context) ([]*models.UnprocessedOrder, error)
@@ -112,20 +120,28 @@ func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.Unprocess
 	if err != nil {
 		return err
 	}
-	var o models.Order
-	if err = json.Unmarshal(resp.Body(), &o); err != nil {
+	var accrualResp AccrualResponse
+	if err = json.Unmarshal(resp.Body(), &accrualResp); err != nil {
 		return err
 	}
+
+	// Конвертируем в наш формат (рубли → копейки)
+	o := &models.Order{
+		Number:  accrualResp.Order,
+		Status:  accrualResp.Status,
+		Accrual: int64(math.Round(accrualResp.Accrual * 100)), // рубли в копейки
+	}
+
 	switch o.Status {
 	case StatusProcessed:
-		if err = ou.updateOrder(ctx, &o); err != nil {
+		if err = ou.updateOrder(ctx, o); err != nil {
 			return
 		}
 		if err = ou.db.RegisterTx(ctx, ordr.UserID, o.Accrual, o.Number); err != nil {
 			return
 		}
 	case StatusProcessing, StatusInvalid:
-		if err = ou.updateOrder(ctx, &o); err != nil {
+		if err = ou.updateOrder(ctx, o); err != nil {
 			return
 		}
 	case StatusRegistered:

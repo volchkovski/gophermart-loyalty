@@ -6,9 +6,9 @@ WITH locked_rows AS (SELECT id
                          WHERE user_id = $1),
      new_transaction AS (
          INSERT INTO transactions (user_id, order_number, amount)
-             SELECT $1, $2, $3
+             SELECT $1, $2, $3::INTEGER
              FROM current_balance
-             WHERE (current_balance.balance + $3) >= 0
+             WHERE (current_balance.balance + $3::INTEGER) >= 0
              RETURNING id)
 SELECT *
 FROM new_transaction;
