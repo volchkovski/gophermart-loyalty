@@ -29,7 +29,6 @@ func WithAuth(v TokenVerifier) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Извлекаем токен из "Bearer <token>"
 			tokenString := authHeader
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
@@ -41,7 +40,7 @@ func WithAuth(v TokenVerifier) func(http.Handler) http.Handler {
 				http.Error(w, "Invalid token", http.StatusUnauthorized)
 				return
 			}
-			// Используем наш собственный тип в качестве ключа
+
 			ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
 			h.ServeHTTP(w, r.WithContext(ctx))
 		}

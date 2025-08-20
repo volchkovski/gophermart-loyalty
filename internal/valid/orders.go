@@ -5,13 +5,13 @@ import (
 )
 
 func OrderNumber(number string) bool {
-	// Проверяем, что строка не пустая
+
 	if len(number) == 0 {
 		return false
 	}
 
 	sum := 0
-	parity := len(number) % 2 // Это сделает проверку четности позиции правильно для строки
+	parity := len(number) % 2
 
 	for i, r := range number {
 		if !unicode.IsDigit(r) {

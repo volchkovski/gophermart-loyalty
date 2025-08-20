@@ -17,7 +17,6 @@ type Processor interface {
 	mw.TokenVerifier
 }
 
-// NewHTTPRouter создает новый маршрутизатор с заданным процессором
 func NewHTTPRouter(p Processor) *HTTPRouter {
 	r := chi.NewRouter()
 

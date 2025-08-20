@@ -65,7 +65,6 @@ func (ou *OrderUpdater) Start(ctx context.Context) {
 
 		ou.startWorkers(ctx, orderCh, errsCh)
 
-		// Первоначальная обработка заказов при запуске
 		logger.Log.Info("OrderUpdater: Initial order processing...")
 		if err := ou.processOrders(ctx, orderCh); err != nil {
 			logger.Log.Errorf("OrderUpdater: Initial processing error: %s", err)
@@ -73,7 +72,7 @@ func (ou *OrderUpdater) Start(ctx context.Context) {
 			return
 		}
 
-		ticker := time.NewTicker(2 * time.Second) // Уменьшено до 2 секунд для быстрого прохождения тестов
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -134,7 +133,6 @@ func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.Unprocess
 		}
 	}()
 
-	// Формируем URL, проверяя наличие протокола
 	var accrualURL string
 	if strings.HasPrefix(ou.accrualAddr, "http://") || strings.HasPrefix(ou.accrualAddr, "https://") {
 		accrualURL = ou.accrualAddr + "/api/orders/" + ordr.Number
@@ -157,15 +155,15 @@ func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.Unprocess
 	switch resp.StatusCode() {
 	case 204:
 		logger.Log.Infof("OrderUpdater: Order %s not yet registered in accrual system (204)", ordr.Number)
-		return nil // Заказ еще не зарегистрирован, попробуем позже
+		return nil
 	case 429:
 		logger.Log.Warnf("OrderUpdater: Rate limit exceeded for order %s (429), retry later", ordr.Number)
-		return nil // Rate limit, попробуем позже
+		return nil
 	case 500:
 		logger.Log.Errorf("OrderUpdater: Accrual system error for order %s (500)", ordr.Number)
 		return fmt.Errorf("accrual system error (500) for order %s", ordr.Number)
 	case 200:
-		// OK, продолжаем обработку
+
 	default:
 		logger.Log.Errorf("OrderUpdater: Unexpected HTTP status %d for order %s", resp.StatusCode(), ordr.Number)
 		return fmt.Errorf("unexpected HTTP status %d for order %s", resp.StatusCode(), ordr.Number)
@@ -180,11 +178,10 @@ func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.Unprocess
 	logger.Log.Infof("OrderUpdater: Parsed accrual response for order %s: status=%s, accrual=%.2f",
 		ordr.Number, accrualResp.Status, accrualResp.Accrual)
 
-	// Конвертируем в наш формат (рубли → копейки)
 	o := &models.Order{
 		Number:  accrualResp.Order,
 		Status:  accrualResp.Status,
-		Accrual: int64(math.Round(accrualResp.Accrual * 100)), // рубли в копейки
+		Accrual: int64(math.Round(accrualResp.Accrual * 100)),
 	}
 
 	switch o.Status {
