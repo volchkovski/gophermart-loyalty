@@ -1,8 +1,9 @@
 package models
 
 import (
-	"github.com/golang-jwt/jwt/v5"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type Order struct {
@@ -18,13 +19,13 @@ type UnprocessedOrder struct {
 }
 
 type Balance struct {
-	Current   int64 `json:"-"`
-	Withdrawn int64 `json:"-"`
+	Current   int64 `json:"current"`
+	Withdrawn int64 `json:"withdrawn"`
 }
 
 type Withdrawal struct {
 	Order       string    `json:"order"`
-	Sum         int64     `json:"-"`
+	Sum         int64     `json:"sum"`
 	ProcessedAt time.Time `json:"processed_at"`
 }
 

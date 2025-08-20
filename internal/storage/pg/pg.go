@@ -5,19 +5,20 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
 	"github.com/volchkovski/gophermart-loyalty/internal/storage"
 	"github.com/volchkovski/gophermart-loyalty/internal/storage/pg/migrator"
-	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 const (
 	MaxOpenConns = 5
-	MaxIdleConns
-	MaxLifetime = 5 * time.Minute
-	MaxIdleTime = 10 * time.Minute
+	MaxIdleConns = 5
+	MaxLifetime  = 5 * time.Minute
+	MaxIdleTime  = 10 * time.Minute
 )
 
 type Pg struct {
@@ -212,7 +213,7 @@ func (pg *Pg) UnprocessedOrders(ctx context.Context) (ordrs []*models.Unprocesse
 	if err != nil {
 		return
 	}
-	func() {
+	defer func() {
 		if err == nil {
 			return
 		}
@@ -244,7 +245,7 @@ func (pg *Pg) UpdateOrder(ctx context.Context, number, status string, accrual in
 	if err != nil {
 		return
 	}
-	func() {
+	defer func() {
 		if err == nil {
 			return
 		}
@@ -264,7 +265,7 @@ func (pg *Pg) DeleteProcessedOrder(ctx context.Context, orderNumber string) (err
 	if err != nil {
 		return
 	}
-	func() {
+	defer func() {
 		if err == nil {
 			return
 		}

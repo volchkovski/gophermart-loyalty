@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+
 	"github.com/volchkovski/gophermart-loyalty/internal/logger"
 	"github.com/volchkovski/gophermart-loyalty/internal/models"
 	"github.com/volchkovski/gophermart-loyalty/internal/services/loyalty"
 	"github.com/volchkovski/gophermart-loyalty/internal/valid"
-	"io"
-	"net/http"
 )
 
 type LoyaltyManager interface {
@@ -33,6 +34,7 @@ func BalanceHandler(lm LoyaltyManager) http.HandlerFunc {
 			handleInternalServerError(w)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if err = json.NewEncoder(w).Encode(b); err != nil {
 			logger.Log.Errorf("Failed to encode result for %d user: %s", userID, err.Error())
@@ -55,7 +57,7 @@ func WithdrawHandler(lm LoyaltyManager) http.HandlerFunc {
 		body, err := io.ReadAll(r.Body)
 		defer func() {
 			if errClose := r.Body.Close(); errClose != nil {
-				logger.Log.Errorf("Failed to close request body: %s", err.Error())
+				logger.Log.Errorf("Failed to close request body: %s", errClose.Error())
 			}
 		}()
 		if err != nil {
@@ -104,6 +106,8 @@ func WithdrawalsHandler(lm LoyaltyManager) http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		if err = json.NewEncoder(w).Encode(&withdrawals); err != nil {
 			logger.Log.Errorf("Failed to encode withdrawals for user with id %d: %s", userID, err.Error())
 			handleInternalServerError(w)

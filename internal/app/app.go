@@ -2,6 +2,11 @@ package app
 
 import (
 	"context"
+	l "log"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/volchkovski/gophermart-loyalty/internal/config"
 	"github.com/volchkovski/gophermart-loyalty/internal/httpserver"
 	"github.com/volchkovski/gophermart-loyalty/internal/logger"
@@ -11,10 +16,6 @@ import (
 	"github.com/volchkovski/gophermart-loyalty/internal/services/loyalty"
 	"github.com/volchkovski/gophermart-loyalty/internal/services/orders"
 	"github.com/volchkovski/gophermart-loyalty/internal/storage/pg"
-	l "log"
-	"os"
-	"os/signal"
-	"syscall"
 )
 
 func MustRun(cfg *config.Config) {
@@ -34,7 +35,7 @@ func MustRun(cfg *config.Config) {
 	}
 	defer func() {
 		if errClose := db.Close(); errClose != nil {
-			logger.Log.Warnf("Failed to close db conn: %s", err.Error())
+			logger.Log.Warnf("Failed to close db conn: %s", errClose.Error())
 		}
 	}()
 	type (
