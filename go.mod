@@ -1,6 +1,6 @@
 module github.com/volchkovski/gophermart-loyalty
 
-go 1.24.2
+go 1.23.12
 
 require (
 	github.com/caarlos0/env/v6 v6.10.1
