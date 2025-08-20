@@ -9,6 +9,8 @@ import (
 	"github.com/volchkovski/gophermart-loyalty/internal/storage"
 	"github.com/volchkovski/gophermart-loyalty/internal/storage/pg/migrator"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 const (
