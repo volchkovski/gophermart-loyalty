@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -133,7 +134,13 @@ func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.Unprocess
 		}
 	}()
 
-	accrualURL := "http://" + ou.accrualAddr + "/api/orders/" + ordr.Number
+	// Формируем URL, проверяя наличие протокола
+	var accrualURL string
+	if strings.HasPrefix(ou.accrualAddr, "http://") || strings.HasPrefix(ou.accrualAddr, "https://") {
+		accrualURL = ou.accrualAddr + "/api/orders/" + ordr.Number
+	} else {
+		accrualURL = "http://" + ou.accrualAddr + "/api/orders/" + ordr.Number
+	}
 	logger.Log.Debugf("OrderUpdater: Requesting accrual for order %s from %s", ordr.Number, accrualURL)
 
 	resp, err := ou.client.R().
