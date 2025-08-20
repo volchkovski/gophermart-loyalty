@@ -1,5 +1,5 @@
 INSERT INTO orders_updating (number, user_id, deadline)
-SELECT o.number, user_id, (NOW() AT TIME ZONE 'UTC' + INTERVAL '1 hour')
+SELECT o.number, o.user_id, (NOW() AT TIME ZONE 'UTC' + INTERVAL '1 hour')
 FROM orders o
          LEFT JOIN orders_updating ou ON o.number = ou.number
 WHERE o.status NOT IN ('INVALID', 'PROCESSED')
