@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/volchkovski/gophermart-loyalty/internal/logger"
-	"github.com/volchkovski/gophermart-loyalty/internal/services/auth"
 	"io"
 	"net/http"
+
+	"github.com/volchkovski/gophermart-loyalty/internal/logger"
+	"github.com/volchkovski/gophermart-loyalty/internal/services/auth"
 )
 
 type Auth interface {
@@ -36,7 +37,7 @@ func RegisterHandler(reg Auth) http.HandlerFunc {
 		}
 		if err = json.Unmarshal(body, &c); err != nil {
 			logger.Log.Errorln("Failed to unmarshal request body: %s", err.Error())
-			handleInternalServerError(w)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		token, err := reg.Register(r.Context(), c.Login, c.Password)
@@ -71,7 +72,7 @@ func LoginHandler(l Auth) http.HandlerFunc {
 		}
 		if err = json.Unmarshal(body, &c); err != nil {
 			logger.Log.Errorln("Failed to unmarshal request body: %s", err.Error())
-			handleInternalServerError(w)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		token, err := l.Login(r.Context(), c.Login, c.Password)

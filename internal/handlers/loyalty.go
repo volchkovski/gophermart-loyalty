@@ -67,7 +67,7 @@ func WithdrawHandler(lm LoyaltyManager) http.HandlerFunc {
 		}
 		if err = json.Unmarshal(body, &wd); err != nil {
 			logger.Log.Errorln("Failed to unmarshal request body: %s", err.Error())
-			handleInternalServerError(w)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		if !valid.OrderNumber(wd.Order) {

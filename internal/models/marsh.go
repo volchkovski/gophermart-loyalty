@@ -43,3 +43,14 @@ func (w *Withdrawal) MarshalJSON() ([]byte, error) {
 		Alias: (*Alias)(w),
 	})
 }
+
+func (o *Order) MarshalJSON() ([]byte, error) {
+	type Alias Order
+	return json.Marshal(&struct {
+		Accrual float64 `json:"accrual,omitempty"`
+		*Alias
+	}{
+		Accrual: float64(o.Accrual) / 100,
+		Alias:   (*Alias)(o),
+	})
+}

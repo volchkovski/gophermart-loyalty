@@ -34,7 +34,7 @@ func NewHTTPRouter(p Processor) *HTTPRouter {
 			r.Post("/", handlers.NewOrderHandler(p))
 		})
 
-		r.Route("/api/user/loyalty", func(r chi.Router) {
+		r.Route("/api/user/balance", func(r chi.Router) {
 			r.Get("/", handlers.BalanceHandler(p))
 			r.Post("/withdraw", handlers.WithdrawHandler(p))
 		})
