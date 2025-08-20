@@ -112,7 +112,7 @@ func (pg *Pg) SaveOrder(ctx context.Context, userID int64, orderNumber string) (
 		}
 	}()
 	var dbUserID int64
-	if err = tx.QueryRowContext(ctx, q.OrderUserID, userID).Scan(&dbUserID); err != nil {
+	if err = tx.QueryRowContext(ctx, q.OrderUserID, orderNumber).Scan(&dbUserID); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return
 		}
