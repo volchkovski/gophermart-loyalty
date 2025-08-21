@@ -21,26 +21,20 @@ type Credentials struct {
 	Password string `json:"password"`
 }
 
-func RegisterHandler(reg Auth) http.HandlerFunc {
+func RegisterHandler(a Auth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var c Credentials
-		body, err := io.ReadAll(r.Body)
 		defer func() {
 			if errClose := r.Body.Close(); errClose != nil {
 				logger.Log.Errorf("Failed to close request body: %s", errClose.Error())
 			}
 		}()
+		c, err := parseCredentials(r)
 		if err != nil {
-			logger.Log.Errorln("Failed to read request body: %s", err.Error())
-			handleInternalServerError(w)
-			return
-		}
-		if err = json.Unmarshal(body, &c); err != nil {
-			logger.Log.Errorln("Failed to unmarshal request body: %s", err.Error())
+			logger.Log.Errorln("Failed to get credentials from request body: %s", err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		token, err := reg.Register(r.Context(), c.Login, c.Password)
+		token, err := a.Register(r.Context(), c.Login, c.Password)
 		if err != nil {
 			if errors.Is(err, auth.ErrLoginIsTaken) {
 				logger.Log.Infoln(err.Error())
@@ -56,26 +50,20 @@ func RegisterHandler(reg Auth) http.HandlerFunc {
 	}
 }
 
-func LoginHandler(l Auth) http.HandlerFunc {
+func LoginHandler(a Auth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var c Credentials
-		body, err := io.ReadAll(r.Body)
 		defer func() {
 			if errClose := r.Body.Close(); errClose != nil {
 				logger.Log.Errorf("Failed to close request body: %s", errClose.Error())
 			}
 		}()
+		c, err := parseCredentials(r)
 		if err != nil {
-			logger.Log.Errorln("Failed to read request body: %s", err.Error())
-			handleInternalServerError(w)
-			return
-		}
-		if err = json.Unmarshal(body, &c); err != nil {
-			logger.Log.Errorln("Failed to unmarshal request body: %s", err.Error())
+			logger.Log.Errorln("Failed to get credentials from request body: %s", err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		token, err := l.Login(r.Context(), c.Login, c.Password)
+		token, err := a.Login(r.Context(), c.Login, c.Password)
 		if err != nil {
 			if errors.Is(err, auth.ErrNoUser) || errors.Is(err, auth.ErrInvalidPassword) {
 				logger.Log.Infoln(err.Error())
@@ -89,4 +77,16 @@ func LoginHandler(l Auth) http.HandlerFunc {
 		w.Header().Set("Authorization", "Bearer "+token)
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+func parseCredentials(r *http.Request) (*Credentials, error) {
+	var c Credentials
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(body, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }

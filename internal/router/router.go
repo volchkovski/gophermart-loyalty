@@ -19,6 +19,7 @@ type Processor interface {
 
 func NewHTTPRouter(p Processor) *HTTPRouter {
 	r := chi.NewRouter()
+	r.Use(mw.WithMaxBytes)
 
 	r.Group(func(r chi.Router) {
 		r.Post("/api/user/register", handlers.RegisterHandler(p))

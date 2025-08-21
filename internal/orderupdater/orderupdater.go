@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -133,88 +134,119 @@ func (ou *OrderUpdater) processOrder(ctx context.Context, ordr *models.Unprocess
 		}
 	}()
 
-	var accrualURL string
-	if strings.HasPrefix(ou.accrualAddr, "http://") || strings.HasPrefix(ou.accrualAddr, "https://") {
-		accrualURL = ou.accrualAddr + "/api/orders/" + ordr.Number
-	} else {
-		accrualURL = "http://" + ou.accrualAddr + "/api/orders/" + ordr.Number
+	resp, err := ou.requestAccrualData(ctx, ordr.Number)
+	if err != nil {
+		return
 	}
-	logger.Log.Debugf("OrderUpdater: Requesting accrual for order %s from %s", ordr.Number, accrualURL)
+
+	if err = ou.validateResponseStatus(ordr.Number, resp.StatusCode()); err != nil {
+		return
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return
+	}
+
+	order, err := ou.parseAccrualResponse(ordr.Number, resp.Body())
+	if err != nil {
+		return
+	}
+
+	return ou.handleOrderStatus(ctx, order, ordr.UserID)
+}
+
+func (ou *OrderUpdater) accrualURL(orderNumber string) string {
+	if strings.HasPrefix(ou.accrualAddr, "http://") || strings.HasPrefix(ou.accrualAddr, "https://") {
+		return ou.accrualAddr + "/api/orders/" + orderNumber
+	}
+	return "http://" + ou.accrualAddr + "/api/orders/" + orderNumber
+}
+
+func (ou *OrderUpdater) requestAccrualData(ctx context.Context, orderNumber string) (*resty.Response, error) {
+	accrualURL := ou.accrualURL(orderNumber)
+	logger.Log.Debugf("OrderUpdater: Requesting accrual for order %s from %s", orderNumber, accrualURL)
 
 	resp, err := ou.client.R().
 		SetContext(ctx).
 		Get(accrualURL)
 	if err != nil {
-		logger.Log.Errorf("OrderUpdater: HTTP request error for order %s: %s", ordr.Number, err)
-		return err
+		logger.Log.Errorf("OrderUpdater: HTTP request error for order %s: %s", orderNumber, err)
+		return nil, err
 	}
 
 	logger.Log.Debugf("OrderUpdater: Received response for order %s: status=%d, body=%s",
-		ordr.Number, resp.StatusCode(), string(resp.Body()))
+		orderNumber, resp.StatusCode(), string(resp.Body()))
 
-	switch resp.StatusCode() {
-	case 204:
-		logger.Log.Infof("OrderUpdater: Order %s not yet registered in accrual system (204)", ordr.Number)
-		return nil
-	case 429:
-		logger.Log.Warnf("OrderUpdater: Rate limit exceeded for order %s (429), retry later", ordr.Number)
-		return nil
-	case 500:
-		logger.Log.Errorf("OrderUpdater: Accrual system error for order %s (500)", ordr.Number)
-		return fmt.Errorf("accrual system error (500) for order %s", ordr.Number)
-	case 200:
+	return resp, nil
+}
 
+func (ou *OrderUpdater) validateResponseStatus(orderNumber string, statusCode int) error {
+	switch statusCode {
+	case http.StatusNoContent:
+		logger.Log.Infof("OrderUpdater: Order %s not yet registered in accrual system (204)", orderNumber)
+		return nil
+	case http.StatusTooManyRequests:
+		logger.Log.Warnf("OrderUpdater: Rate limit exceeded for order %s (429), retry later", orderNumber)
+		return nil
+	case http.StatusInternalServerError:
+		logger.Log.Errorf("OrderUpdater: Accrual system error for order %s (500)", orderNumber)
+		return fmt.Errorf("accrual system error (500) for order %s", orderNumber)
+	case http.StatusOK:
+		return nil
 	default:
-		logger.Log.Errorf("OrderUpdater: Unexpected HTTP status %d for order %s", resp.StatusCode(), ordr.Number)
-		return fmt.Errorf("unexpected HTTP status %d for order %s", resp.StatusCode(), ordr.Number)
+		logger.Log.Errorf("OrderUpdater: Unexpected HTTP status %d for order %s", statusCode, orderNumber)
+		return fmt.Errorf("unexpected HTTP status %d for order %s", statusCode, orderNumber)
 	}
+}
 
+func (ou *OrderUpdater) parseAccrualResponse(orderNumber string, body []byte) (*models.Order, error) {
 	var accrualResp AccrualResponse
-	if err = json.Unmarshal(resp.Body(), &accrualResp); err != nil {
-		logger.Log.Errorf("OrderUpdater: JSON unmarshal error for order %s: %s", ordr.Number, err)
-		return err
+	if err := json.Unmarshal(body, &accrualResp); err != nil {
+		logger.Log.Errorf("OrderUpdater: JSON unmarshal error for order %s: %s", orderNumber, err)
+		return nil, err
 	}
 
 	logger.Log.Infof("OrderUpdater: Parsed accrual response for order %s: status=%s, accrual=%.2f",
-		ordr.Number, accrualResp.Status, accrualResp.Accrual)
+		orderNumber, accrualResp.Status, accrualResp.Accrual)
 
-	o := &models.Order{
+	return &models.Order{
 		Number:  accrualResp.Order,
 		Status:  accrualResp.Status,
 		Accrual: int64(math.Round(accrualResp.Accrual * 100)),
-	}
+	}, nil
+}
 
-	switch o.Status {
+func (ou *OrderUpdater) handleOrderStatus(ctx context.Context, order *models.Order, userID int64) error {
+	switch order.Status {
 	case StatusProcessed:
-		logger.Log.Infof("OrderUpdater: Order %s processed with accrual %d kopecks", o.Number, o.Accrual)
-		if err = ou.updateOrder(ctx, o); err != nil {
-			logger.Log.Errorf("OrderUpdater: Failed to update order %s: %s", o.Number, err)
-			return
+		logger.Log.Infof("OrderUpdater: Order %s processed with accrual %d kopecks", order.Number, order.Accrual)
+		if err := ou.updateOrder(ctx, order); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to update order %s: %s", order.Number, err)
+			return err
 		}
-		if err = ou.db.RegisterTx(ctx, ordr.UserID, o.Accrual, o.Number); err != nil {
-			logger.Log.Errorf("OrderUpdater: Failed to register transaction for order %s: %s", o.Number, err)
-			return
+		if err := ou.db.RegisterTx(ctx, userID, order.Accrual, order.Number); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to register transaction for order %s: %s", order.Number, err)
+			return err
 		}
-		logger.Log.Infof("OrderUpdater: Successfully processed and registered order %s", o.Number)
+		logger.Log.Infof("OrderUpdater: Successfully processed and registered order %s", order.Number)
 	case StatusProcessing:
-		logger.Log.Infof("OrderUpdater: Order %s still processing", o.Number)
-		if err = ou.updateOrder(ctx, o); err != nil {
-			logger.Log.Errorf("OrderUpdater: Failed to update processing order %s: %s", o.Number, err)
-			return
+		logger.Log.Infof("OrderUpdater: Order %s still processing", order.Number)
+		if err := ou.updateOrder(ctx, order); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to update processing order %s: %s", order.Number, err)
+			return err
 		}
 	case StatusInvalid:
-		logger.Log.Infof("OrderUpdater: Order %s marked as invalid", o.Number)
-		if err = ou.updateOrder(ctx, o); err != nil {
-			logger.Log.Errorf("OrderUpdater: Failed to update invalid order %s: %s", o.Number, err)
-			return
+		logger.Log.Infof("OrderUpdater: Order %s marked as invalid", order.Number)
+		if err := ou.updateOrder(ctx, order); err != nil {
+			logger.Log.Errorf("OrderUpdater: Failed to update invalid order %s: %s", order.Number, err)
+			return err
 		}
 	case StatusRegistered:
-		logger.Log.Infof("OrderUpdater: Order %s registered, waiting for processing", o.Number)
+		logger.Log.Infof("OrderUpdater: Order %s registered, waiting for processing", order.Number)
 	default:
-		logger.Log.Errorf("OrderUpdater: Unexpected status %s for order %s", o.Status, o.Number)
-		return fmt.Errorf("unexpected status: %s", o.Status)
+		logger.Log.Errorf("OrderUpdater: Unexpected status %s for order %s", order.Status, order.Number)
+		return fmt.Errorf("unexpected status: %s", order.Status)
 	}
-	return
+	return nil
 }
 
 func (ou *OrderUpdater) updateOrder(ctx context.Context, o *models.Order) error {

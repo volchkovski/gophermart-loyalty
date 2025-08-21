@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/volchkovski/gophermart-loyalty/internal/config"
 	"github.com/volchkovski/gophermart-loyalty/internal/httpserver"
@@ -58,20 +59,39 @@ func MustRun(cfg *config.Config) {
 	server.Start()
 
 	updater := orderupdater.New(db, cfg.AccrualAddr)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	updater.Start(ctx)
+	updaterCtx, updaterCancel := context.WithCancel(context.Background())
+	defer updaterCancel()
+	updater.Start(updaterCtx)
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
 
 	select {
 	case err = <-server.Notify():
+		logger.Log.Errorf("HTTP server error: %s", err.Error())
 	case err = <-updater.Notify():
+		logger.Log.Errorf("Order updater error: %s", err.Error())
 	case s := <-interrupt:
-		logger.Log.Infof("app - MustRun - signal: %s", s.String())
+		logger.Log.Infof("Received signal: %s, starting graceful shutdown", s.String())
+		gracefulShutdown(server, updaterCancel, 30*time.Second)
+		return
 	}
 	if err != nil {
-		logger.Log.Infof("app - MustRun - error: %s", err.Error())
+		logger.Log.Errorf("Application error, performing graceful shutdown: %s", err.Error())
+		gracefulShutdown(server, updaterCancel, 10*time.Second)
 	}
+}
+
+func gracefulShutdown(s *httpserver.HTTPServer, updaterCancel context.CancelFunc, serverTimeOut time.Duration) {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), serverTimeOut)
+	defer shutdownCancel()
+
+	updaterCancel()
+	logger.Log.Info("Order updater shutdown signal sent")
+
+	if shutdownErr := s.Shutdown(shutdownCtx); shutdownErr != nil {
+		logger.Log.Errorf("HTTP server shutdown failed: %s", shutdownErr.Error())
+	}
+
+	logger.Log.Info("Application shutdown completed")
 }
