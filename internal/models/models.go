@@ -1,0 +1,41 @@
+package models
+
+import (
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+type Order struct {
+	Number     string    `json:"number"`
+	Status     string    `json:"status"`
+	Accrual    int64     `json:"-"`
+	UploadedAt time.Time `json:"uploaded_at"`
+}
+
+type UnprocessedOrder struct {
+	Number string
+	UserID int64
+}
+
+type Balance struct {
+	Current   int64 `json:"current"`
+	Withdrawn int64 `json:"withdrawn"`
+}
+
+type Withdrawal struct {
+	Order       string    `json:"order"`
+	Sum         int64     `json:"sum"`
+	ProcessedAt time.Time `json:"processed_at"`
+}
+
+type User struct {
+	ID             int64
+	Login          string
+	HashedPassword string
+}
+
+type CustomClaims struct {
+	UserID int64 `json:"user_id"`
+	jwt.RegisteredClaims
+}

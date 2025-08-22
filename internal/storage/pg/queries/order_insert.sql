@@ -1,0 +1,1 @@
+INSERT INTO orders (user_id, number) VALUES ($1, $2);
